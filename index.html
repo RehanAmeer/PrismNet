@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PrismNet | Packet Analyzer</title>
+    <style>
+        /* --- CSS VARIABLES (DARK MODE DEFAULT) --- */
+        :root {
+            --bg-base: #0f172a;
+            --bg-surface: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            --accent-blue: #38bdf8;
+            
+            --row-tcp: rgba(168, 85, 247, 0.15); 
+            --row-udp: rgba(234, 179, 8, 0.15);  
+            --row-icmp: rgba(239, 68, 68, 0.15); 
+        }
+
+        /* --- LIGHT MODE VARIABLES --- */
+        body.light-mode {
+            --bg-base: #f1f5f9;
+            --bg-surface: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --border-color: #cbd5e1;
+            --accent-blue: #0284c7;
+            
+            --row-tcp: rgba(168, 85, 247, 0.15); 
+            --row-udp: rgba(234, 179, 8, 0.25);  
+            --row-icmp: rgba(239, 68, 68, 0.15); 
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            margin: 0; padding: 20px;
+            display: flex; flex-direction: column;
+            height: 100vh; box-sizing: border-box;
+            transition: background-color 0.3s, color 0.3s;
+            overflow: hidden; 
+        }
+
+        /* --- NODE PULSE LOADING SCREEN --- */
+        #loadingScreen {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background-color: var(--bg-base);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 9999; transition: opacity 1.2s ease-out, visibility 1.2s ease-out;
+            perspective: 1000px;
+        }
+
+        .net-nodes {
+            position: relative; width: 300px; height: 250px;
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        .central-node {
+            width: 60px; height: 60px; border-radius: 50%; background-color: transparent;
+            border: 2px solid var(--accent-blue); box-shadow: 0 0 20px var(--accent-blue);
+            display: flex; justify-content: center; align-items: center; z-index: 10;
+            animation: centralPulse 2.5s infinite ease-in-out;
+        }
+
+        @keyframes centralPulse {
+            0%, 100% { box-shadow: 0 0 10px var(--accent-blue); }
+            50% { box-shadow: 0 0 30px rgba(0, 229, 255, 0.8); transform: scale(1.05); }
+        }
+
+        .line { position: absolute; background-color: var(--border-color); transform-origin: left center; height: 1px; animation: lineShoot 0.8s ease-out forwards; opacity: 0; }
+        @keyframes lineShoot { to { opacity: 1; } }
+
+        .packet-dot {
+            position: absolute; width: 5px; height: 5px; background-color: var(--accent-blue); border-radius: 50%;
+            box-shadow: 0 0 8px var(--accent-blue); animation: packetFlow 1.2s linear infinite; animation-play-state: paused;
+        }
+
+        @keyframes packetFlow {
+            0% { left: 0%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { left: 100%; opacity: 0; }
+        }
+
+        /* --- HEADER & LOGO --- */
+        header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); margin-bottom: 15px; }
+        .header-left { display: flex; align-items: center; gap: 15px; }
+        .header-right { display: flex; align-items: center; gap: 20px; }
+        h1 { margin: 0; font-size: 24px; color: var(--accent-blue); }
+        .pu-logo { height: 50px; width: auto; border-radius: 4px; }
+
+        /* --- TOOLBAR --- */
+        .toolbar { display: flex; justify-content: space-between; align-items: center; background-color: var(--bg-surface); padding: 12px 20px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 15px; flex-wrap: wrap; gap: 15px; }
+        .btn-group { display: flex; gap: 10px; align-items: center; }
+        button { padding: 8px 16px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; color: white; }
+        button:hover { opacity: 0.8; }
+        .btn-start { background-color: #22c55e; }
+        .btn-stop { background-color: #ef4444; }
+        .btn-action { background-color: #64748b; }
+        .btn-theme { background-color: transparent; border: 1px solid var(--border-color); color: var(--text-main); font-size: 18px; padding: 6px 12px; }
+        .search-box { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-base); color: var(--text-main); outline: none; width: 250px; }
+        .checkbox-group { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text-muted); font-weight: 600; }
+
+        /* --- STATS GRID --- */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 15px; margin-bottom: 15px; }
+        .stat-card { background-color: var(--bg-surface); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); text-align: center; }
+        .stat-value { font-size: 24px; font-weight: bold; margin-bottom: 5px; color: var(--accent-blue); }
+        .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+
+        /* --- TABLE --- */
+        .table-container { flex-grow: 1; background-color: var(--bg-surface); border-radius: 8px; border: 1px solid var(--border-color); overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th { position: sticky; top: 0; background-color: var(--bg-base); padding: 12px 15px; font-size: 12px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border-color); z-index: 10; }
+        td { padding: 10px 15px; border-bottom: 1px solid var(--border-color); font-size: 14px; font-family: monospace; }
+        tr.row-tcp { background-color: var(--row-tcp); }
+        tr.row-udp { background-color: var(--row-udp); }
+        tr.row-icmp { background-color: var(--row-icmp); }
+        tr { cursor: pointer; transition: filter 0.1s; }
+        tr:hover { filter: brightness(1.2); }
+        body.light-mode tr:hover { filter: brightness(0.90); }
+
+        /* --- SLIDE-OUT PANEL --- */
+        .side-panel {
+            position: fixed; top: 0; right: -550px; width: 500px; height: 100vh;
+            background-color: var(--bg-surface); border-left: 1px solid var(--border-color);
+            box-shadow: -5px 0 30px rgba(0,0,0,0.5); transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 100; display: flex; flex-direction: column;
+        }
+        body.light-mode .side-panel { box-shadow: -5px 0 30px rgba(0,0,0,0.1); }
+        .side-panel.open { right: 0; }
+        .panel-header { padding: 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
+        .panel-header h3 { margin: 0; color: var(--accent-blue); }
+        .panel-close { background: transparent; border: none; font-size: 20px; color: var(--text-main); cursor: pointer; padding: 0; }
+        .panel-content { padding: 20px; overflow-y: auto; font-size: 13px; }
+        
+        .data-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed rgba(255, 255, 255, 0.05); }
+        .data-label { color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+        .data-val { color: var(--text-main); font-family: monospace; font-weight: bold; }
+        .section-title { color: var(--accent-blue); margin: 20px 0 8px 0; font-weight: bold; font-size: 12px; letter-spacing: 1px; }
+        .raw-box { background: #000000; color: #38bdf8; padding: 12px; border-radius: 4px; font-family: monospace; font-size: 12px; white-space: pre; border: 1px solid #1e293b; line-height: 1.4; overflow-x: auto; }
+    </style>
+</head>
+<body>
+
+    <div id="loadingScreen">
+        <div class="net-nodes">
+            <div class="central-node"></div>
+            <div id="peripheralNodes"></div>
+            <div id="networkLines"></div>
+        </div>
+    </div>
+
+    <header>
+        <div class="header-left">
+            <h1>PrismNet</h1>
+            <span id="statusIndicator" style="color: #ef4444; font-weight: bold;">● OFFLINE</span>
+        </div>
+        <div class="header-right">
+            <button class="btn-theme" onclick="toggleTheme()" title="Toggle Light/Dark Mode">🌓</button>
+            <img src="pu-logo.png" alt="Punjab University Logo" class="pu-logo" onerror="this.style.display='none'">
+        </div>
+    </header>
+
+    <div class="toolbar">
+        <div class="btn-group">
+            <button class="btn-start" onclick="startCapture()">▶ Start</button>
+            <button class="btn-stop" onclick="stopCapture()">■ Stop</button>
+            <button class="btn-action" onclick="exportCSV()">📥 Export CSV</button>
+            <button class="btn-action" onclick="document.getElementById('importCSVInput').click()">📤 Import CSV</button>
+            <input type="file" id="importCSVInput" accept=".csv" style="display: none;" onchange="importCSV(event)">
+        </div>
+        
+        <div class="btn-group">
+            <div class="checkbox-group">
+                <input type="checkbox" id="autoScroll" checked>
+                <label for="autoScroll">Auto-Scroll</label>
+            </div>
+            <input type="text" id="searchInput" class="search-box" placeholder="Filter by IP, Protocol, or Port..." onkeyup="renderTable()">
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Total</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-tcp" style="color: #a855f7;">0</div><div class="stat-label">TCP</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-udp" style="color: #eab308;">0</div><div class="stat-label">UDP</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-icmp" style="color: #ef4444;">0</div><div class="stat-label">ICMP</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-avg">0 B</div><div class="stat-label">Avg Size</div></div>
+    </div>
+
+    <div class="table-container" id="tableContainer">
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Source IP</th>
+                    <th>Src Port</th>
+                    <th>Destination IP</th>
+                    <th>Dst Port</th>
+                    <th>Protocol</th>
+                    <th>Service</th>
+                    <th>Size (Bytes)</th>
+                </tr>
+            </thead>
+            <tbody id="packetTableBody"></tbody>
+        </table>
+    </div>
+
+    <div id="sidePanel" class="side-panel">
+        <div class="panel-header">
+            <h3>Packet Details</h3>
+            <button class="panel-close" onclick="closePanel()">✕</button>
+        </div>
+        <div id="panelContent" class="panel-content"></div>
+    </div>
+
+    <script>
+        // --- NODE ANIMATION LOGIC ---
+        const NODE_COUNT = 6;
+        const cx = 150; const cy = 125; const radius = 100;
+        const periphery = document.getElementById('peripheralNodes');
+        const lines = document.getElementById('networkLines');
+
+        for (let i = 0; i < NODE_COUNT; i++) {
+            const angle = (i / NODE_COUNT) * (2 * Math.PI);
+            const x = cx + radius * Math.cos(angle);
+            const y = cy + radius * Math.sin(angle);
+
+            const node = document.createElement('div');
+            node.style.cssText = `position:absolute; width:10px; height:10px; border:1px solid var(--border-color); border-radius:50%; left:${x - 5}px; top:${y - 5}px; opacity:0; animation:lineShoot 0.8s ease-out forwards ${0.3 + i * 0.1}s;`;
+            periphery.appendChild(node);
+
+            const dist = Math.sqrt(Math.pow(x - cx, 2) + Math.pow(y - cy, 2));
+            const angleLine = Math.atan2(cy - y, cx - x) * (180 / Math.PI);
+
+            const line = document.createElement('div');
+            line.className = 'line';
+            line.style.cssText = `left:${x}px; top:${y}px; width:${dist}px; transform:rotate(${angleLine}deg); animation-delay:${i * 0.1}s;`;
+            
+            const packet = document.createElement('div');
+            packet.className = 'packet-dot';
+            packet.style.animationDelay = `${1 + (i % 2 === 0 ? 0 : 0.6)}s`;
+            
+            line.appendChild(packet);
+            lines.appendChild(line);
+        }
+
+        window.addEventListener('load', () => {
+            setTimeout(() => { document.querySelectorAll('.packet-dot').forEach(p => p.style.animationPlayState = 'running'); }, 1000);
+            setTimeout(() => { document.querySelectorAll('.packet-dot').forEach(p => p.style.animationDuration = '0.7s'); }, 2000);
+            setTimeout(() => { document.querySelectorAll('.packet-dot').forEach(p => p.style.animationDuration = '0.4s'); }, 3500);
+            setTimeout(() => {
+                const loader = document.getElementById('loadingScreen');
+                if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.remove(), 1200); }
+            }, 5000); 
+        });
+
+        // --- CORE LOGIC ---
+        let pollInterval = null;
+        let isCapturing = false;
+        let latestPackets = [];
+
+        function toggleTheme() { document.body.classList.toggle('light-mode'); }
+
+        async function startCapture() {
+            try {
+                await fetch('/start?t=' + Date.now()); 
+                isCapturing = true;
+                document.getElementById('statusIndicator').style.color = '#22c55e';
+                document.getElementById('statusIndicator').innerText = '● LIVE CAPTURE';
+                if (!pollInterval) pollInterval = setInterval(fetchData, 300); 
+            } catch (err) { alert("Could not reach backend."); }
+        }
+
+        async function stopCapture() {
+            try {
+                await fetch('/stop?t=' + Date.now()); 
+                isCapturing = false;
+                document.getElementById('statusIndicator').style.color = '#ef4444';
+                document.getElementById('statusIndicator').innerText = '● STOPPED';
+                clearInterval(pollInterval); pollInterval = null;
+                fetchData();
+            } catch (err) {}
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch('/data?t=' + Date.now()); 
+                if (!response.ok) return;
+                const data = await response.json();
+                updateStats(data.stats);
+                latestPackets = data.packets || [];
+                renderTable();
+            } catch (err) {}
+        }
+
+        function updateStats(stats) {
+            if (!stats) return;
+            document.getElementById('stat-total').innerText = stats.total || 0;
+            document.getElementById('stat-tcp').innerText = stats.tcp || 0;
+            document.getElementById('stat-udp').innerText = stats.udp || 0;
+            document.getElementById('stat-icmp').innerText = stats.icmp || 0;
+            document.getElementById('stat-avg').innerText = (stats.avg_size ? parseFloat(stats.avg_size).toFixed(2) : 0) + ' B';
+        }
+
+        function exportCSV() {
+            if (latestPackets.length === 0) return alert("No data to export.");
+            let csv = "Time,Source IP,Src Port,Destination IP,Dst Port,Protocol,Service,Size\n";
+            latestPackets.forEach(p => {
+                csv += `${p.time},${p.src_ip},${p.src_port},${p.dst_ip},${p.dst_port},${p.protocol},${p.service},${p.size}\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = 'NetMon_Export.csv'; a.click();
+        }
+
+        // --- NEW IMPORT CSV FUNCTION ---
+        function importCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const lines = text.split(/\r\n|\n/);
+                if (lines.length <= 1) return alert("Empty or invalid CSV file.");
+
+                const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                const timeIdx = headers.indexOf("time");
+                const srcIpIdx = headers.indexOf("source ip") !== -1 ? headers.indexOf("source ip") : headers.indexOf("source");
+                const srcPortIdx = headers.indexOf("src port") !== -1 ? headers.indexOf("src port") : headers.indexOf("source port");
+                const dstIpIdx = headers.indexOf("destination ip") !== -1 ? headers.indexOf("destination ip") : headers.indexOf("destination");
+                const dstPortIdx = headers.indexOf("dst port") !== -1 ? headers.indexOf("dst port") : headers.indexOf("destination port");
+                const protocolIdx = headers.indexOf("protocol");
+                const serviceIdx = headers.indexOf("service");
+                const sizeIdx = headers.indexOf("size");
+
+                if (timeIdx === -1 || srcIpIdx === -1 || dstIpIdx === -1) {
+                    return alert("CSV format mismatch. File must contain Time, Source IP, and Destination IP headers.");
+                }
+
+                let importedPackets = [];
+                for (let i = 1; i < lines.length; i++) {
+                    if (lines[i].trim() === "") continue;
+
+                    const row = parseCSVLine(lines[i]);
+                    if (row.length < headers.length) continue;
+
+                    const packet = {
+                        time: row[timeIdx] || "-",
+                        src_ip: row[srcIpIdx] || "-",
+                        src_port: parseInt(row[srcPortIdx]) || 0,
+                        dst_ip: row[dstIpIdx] || "-",
+                        dst_port: parseInt(row[dstPortIdx]) || 0,
+                        protocol: (row[protocolIdx] || "Unknown").toUpperCase(),
+                        service: row[serviceIdx] || "Unknown",
+                        size: parseInt(row[sizeIdx]) || 0,
+                        hex: "Offline imported capture file. Detailed binary payload dump unavailable."
+                    };
+                    importedPackets.push(packet);
+                }
+
+                if (importedPackets.length > 0) {
+                    latestPackets = importedPackets;
+                    renderTable();
+
+                    // Recompute Statistics for imported packets
+                    let tcp = 0, udp = 0, icmp = 0, totalSize = 0;
+                    latestPackets.forEach(p => {
+                        if (p.protocol === 'TCP') tcp++;
+                        else if (p.protocol === 'UDP') udp++;
+                        else if (p.protocol === 'ICMP') icmp++;
+                        totalSize += p.size;
+                    });
+
+                    updateStats({
+                        total: latestPackets.length,
+                        tcp: tcp,
+                        udp: udp,
+                        icmp: icmp,
+                        avg_size: latestPackets.length > 0 ? (totalSize / latestPackets.length).toFixed(2) : 0
+                    });
+
+                    alert(`Successfully imported ${importedPackets.length} packets.`);
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = ""; // Clear input to allow re-uploading same file
+        }
+
+        // CSV parsing helper to handle escaped inner text correctly
+        function parseCSVLine(line) {
+            const values = [];
+            let inQuotes = false;
+            let currentVal = '';
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    values.push(currentVal.trim());
+                    currentVal = '';
+                } else {
+                    currentVal += char;
+                }
+            }
+            values.push(currentVal.trim());
+            return values;
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('packetTableBody');
+            tbody.innerHTML = ''; 
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const autoScroll = document.getElementById('autoScroll').checked;
+
+            let filtered = search ? latestPackets.filter(p => JSON.stringify(p).toLowerCase().includes(search)) : latestPackets;
+
+            filtered.slice(-150).forEach(p => {
+                const tr = document.createElement('tr');
+                if (p.protocol === 'TCP') tr.className = 'row-tcp';
+                if (p.protocol === 'UDP') tr.className = 'row-udp';
+                if (p.protocol === 'ICMP') tr.className = 'row-icmp';
+
+                tr.innerHTML = `
+                    <td>${p.time || '-'}</td>
+                    <td>${p.src_ip || '-'}</td>
+                    <td>${p.src_port || '-'}</td>
+                    <td>${p.dst_ip || '-'}</td>
+                    <td>${p.dst_port || '-'}</td>
+                    <td><strong>${p.protocol || '-'}</strong></td>
+                    <td>${p.service || '-'}</td>
+                    <td>${p.size || 0}</td>
+                `;
+                tr.onclick = () => openPanel(p);
+                tbody.appendChild(tr);
+            });
+
+            if (autoScroll) { document.getElementById('tableContainer').scrollTop = document.getElementById('tableContainer').scrollHeight; }
+        }
+
+        function openPanel(packet) {
+            const panel = document.getElementById('sidePanel');
+            const content = document.getElementById('panelContent');
+            content.innerHTML = `
+                <div class="data-row"><span class="data-label">Time Logged</span><span class="data-val">${packet.time || '-'}</span></div>
+                <div class="data-row"><span class="data-label">Protocol</span><span class="data-val">${packet.protocol || '-'}</span></div>
+                <div class="data-row"><span class="data-label">Service Name</span><span class="data-val">${packet.service || '-'}</span></div>
+                <div class="data-row"><span class="data-label">Total Size</span><span class="data-val">${packet.size || 0} Bytes</span></div>
+
+                <div class="section-title">Host Addresses</div>
+                <div class="data-row"><span class="data-label">Source IP</span><span class="data-val">${packet.src_ip || '-'}</span></div>
+                <div class="data-row"><span class="data-label">Source Port</span><span class="data-val">${packet.src_port || 'N/A'}</span></div>
+                <div class="data-row"><span class="data-label">Destination IP</span><span class="data-val">${packet.dst_ip || '-'}</span></div>
+                <div class="data-row"><span class="data-label">Destination Port</span><span class="data-val">${packet.dst_port || 'N/A'}</span></div>
+
+                <div class="section-title">ASCII Hex Data Preview</div>
+                <div class="raw-box">${packet.hex || 'No payload data available.'}</div>
+            `;
+            panel.classList.add('open');
+        }
+
+        function closePanel() { document.getElementById('sidePanel').classList.remove('open'); }
+    </script>
+</body>
+</html>
